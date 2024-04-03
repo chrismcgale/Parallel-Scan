@@ -1,10 +1,20 @@
-__host__ hierchical_scan(float *X, float *Y, unsigned int n, bool inclusive = true) {
+__host__  hierchical_scan(float *X, float *Y, unsigned int n, bool inclusive = true) {
     float S[n/SECTION_SIZE];
+    cudaMalloc((void**)&X, sizeof(float));
+    cudaMalloc((void**)&Y, sizeof(float));
+    cudaMalloc((void**)&S, sizeof(float));
+
     hierchical_scan_kernel<<<n / SECTION_SIZE, SECTION_SIZE>>>(X, Y, S, n, inclusive);
 
     Kogge_Stone_scan_kernel<<<1, n / SECTION_SIZE>>>(S, S, n / SECTION_SIZE, true);
 
     hierchical_scan_final_kernel<<<n / SECTION_SIZE, SECTION_SIZE>>>(S, Y);
+
+    cudaFree(X);
+    cudaFree(Y);
+    cudaFree(S);
+
+    return 0;
 }
 
 // Same as KoggeStone but also writes partial sums to S. Could use BrentKung instead.
