@@ -9,8 +9,8 @@ __host__ radix_sort(unsigned int* input, unsigned int* output, unisgned int n, u
         unsigned int onesPerBlock[2*(n / SECTION_SIZE)] = {0};
         unsigned int blockPositions[2*(n / SECTION_SIZE)] = {0};
 
-        cudaMalloc((void**)&input, sizeof(unsigned int));
-        cudaMalloc((void**)&output, sizeof(unsigned int));
+        cudaMalloc((void**)&input, sizeof(input) / sizeof(input[0]));
+        cudaMalloc((void**)&output, sizeof(output) / sizeof(output[0]));
 
         radix_sort_iter_get_bits<<<n / SECTION_SIZE, SECTION_SIZE>>>(input, bits, key, n, i);
 
