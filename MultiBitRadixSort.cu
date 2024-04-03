@@ -1,13 +1,17 @@
+#DEFINE BITS_PER_ITER 2;
+
 
 // Idea behind radix sort is to iterate over each digit (left to right) and order
 // Not an in place algorithm
 __host__ radix_sort(unsigned int* input, unsigned int* output, unisgned int n, unsigned int sigFigs) {
 
-    for (int i = 0; i < sigFigs; i++) {
+    int rows = (int)pow(2, BITS_PER_ITER);
+
+    for (int i = 0; i < sigFigs / BITS_PER_ITER; i++) {
 
         // 2 * num of blocks
-        unsigned int onesPerBlock[2*(n / SECTION_SIZE)] = {0};
-        unsigned int blockPositions[2*(n / SECTION_SIZE)] = {0};
+        unsigned int onesPerBlock[rows*(n / SECTION_SIZE)] = {0};
+        unsigned int blockPositions[rows*(n / SECTION_SIZE)] = {0};
 
         cudaMalloc((void**)&input, sizeof(unsigned int));
         cudaMalloc((void**)&output, sizeof(unsigned int));
@@ -17,7 +21,7 @@ __host__ radix_sort(unsigned int* input, unsigned int* output, unisgned int n, u
         // exclusive scan on ones / zeros in each block. Could change to parallel but likely too few blocks for it to make a big difference
         blockPositions[0] = 0;
         for (unsigned int j = 0; j < n / SECTION_SIZE; j++) {
-            for (unsigned int k = 0; k < blockDim.x; k++) if (bits[j][k] == 1) { onesPerBlock[j] += 1; } else { onesPerBlock[j + (n / SECTION_SIZE)] += 1; }
+            for (unsigned int k = 0; k < blockDim.x; k++) onesPerBlock[j + ((n / SECTION_SIZE)) * bits[j][k] ] += 1;
         }
 
         for (unsigned int j = 1; j < n / SECTION_SIZE; j++) {
@@ -42,49 +46,64 @@ __global__ void radix_sort_iter_get_bits(unsigned int* input unsigned int* bits,
     unsigned int bit, key;
     if (i < n) {
         key = input[i];
-        bit = (key >> iter) & 1;
-        bits[i] = bit;
+        bit_set = (key >> iter) & ((1 << BITS_PER_ITER) - 1);
+        bits[i] = bit_set;
     }
 
     __syncthreads();
 
-
-    // Sort internally
     __shared__ unsigned int exclsuiveScannedBits[blockDim.x];
-
     if (i < n) {
-        for (unsigned int stride = 1; stride < blockDim.x; stride *= 2) {
-            __syncthreads();
-            float temp;
-            if (threadIdx.x >= stride) {
-                temp = bits[i] + bits[i - stride];
-            }
-            __syncthreads();
-            if (threadIdx.x >= stride) {
-                bits[i] = temp;
-            }
-        }
-        if (i < n) {
-            exclsuiveScannedBits[i] = bits[i];
-        }
+        exclsuiveScannedBits[i] = bits[i];
     }
-
     __syncthreads();
 
+    // One exclusive scan per bit is required
     if (i < n) {
-        unsigned int numOnesBefore = (i > 0) ? exclsuiveScannedBits[i - 1] : 0;
-        unsigned int numOnesTotal = exclsuiveScannedBits[n - 1];
-        unsigned int dst = (bit == 0) ? (blockIdx*blockDim + threadIdx - numOnesBefore) : ((blockIdx + 1)*blockDim + threadIdx - numOnesTotal - numOnesBefore);
+        for (unsigned int j = 0; j < BITS_PER_ITER; j++) {
+            for (unsigned int stride = 1; stride < blockDim.x; stride *= 2) {
+                __syncthreads();
+                float temp;
+                if (i >= stride) {
+                    temp = exclsuiveScannedBits[i] + exclsuiveScannedBits[i - stride];
+                }
+                __syncthreads();
+                if (i >= stride) {
+                    exclsuiveScannedBits[i] = temp;
+                }
+            }
+
+            __syncthreads();
+
+            unsigned int numOnesBefore = (i > 0) ? exclsuiveScannedBits[i - 1] : 0;
+            unsigned int numOnesTotal = exclsuiveScannedBits[n - 1];
+
+            unsigned int dst = (bit == 0) ? (i - numOnesBefore) : (n - numOnesTotal - numOnesBefore);
+
+            unsigned int temp = exclsuiveScannedBits[i];
+
+            __syncthreads();
+
+            exclsuiveScannedBits[dst] = temp;
+
+            __syncthreads();
+        
+
+        }
+        unsigned int dst = blockIdx*blockDim + pos;
         
         input[dst] = key;
     }
+
 }
+
+
 
 // Global sort
 __global__ void radix_sort_iter_assign(unsigned int* input, unsigned int* output, unsigned int* blockPositions, unisgned int n) {
     unsigned int i = threadIdx.x;
     if (i < n) {
-        unsigned int dst = (bit == 0) ? (blockPositions[blockIdx.x] + i) : (blockPositions[blockIdx.x + (n / SECTION_SIZE)] + i);
+        unsigned int dst = blockPositions[blockIdx.x + ((n / SECTION_SIZE)) * bits[j][k]] + i;
         
         output[dst] = input[i];
     }
